@@ -1,6 +1,7 @@
 package com.example.SimActivation.Repository;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -38,6 +39,27 @@ public class EmailRepository {
 		}
 		return result;
 		
+		
+	}
+	
+	public void propertyMapping() {
+		String sql = "Select email_id,property_ids from user_details";
+		List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
+		HashMap<String, String> hmap = new HashMap<String, String>();
+		for(Map<String, Object> row:rows){
+			String property_ids=(String)row.get("property_ids");
+			String email_id=(String)row.get("email_id");
+			String[] property=property_ids.split(",");
+			
+			for(String s:property) {
+				jdbcTemplate.update(
+		                "insert into property_mapping (email_id , property_id ) values(?,?)",
+		                email_id, Integer.parseInt(s));
+			}
+			
+		}
+		
+
 		
 	}
 }

@@ -3,18 +3,29 @@ package com.example.SimActivation.Service;
 import java.io.*;
 import java.sql.*;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import javax.mail.MessagingException;
+import javax.mail.internet.MimeMessage;
+
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.xssf.usermodel.XSSFSheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.BeanPropertyRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.example.SimActivation.Model.CampaignDetails;
 import com.example.SimActivation.Model.CampaignStatus;
 import com.example.SimActivation.Model.EmailDetails;
+import com.example.SimActivation.Model.FetchCampaignDetails;
+import com.example.SimActivation.Model.UploadResult;
 import com.example.SimActivation.Repository.EmailRepository;
 
 @Service
@@ -26,6 +37,8 @@ public class SimService {
 	EmailRepository emailRepository;
 	@Autowired
     private JdbcTemplate jdbcTemplate;
+	@Autowired
+    JavaMailSender javaMailSender;
 	
 	
 	
@@ -58,7 +71,7 @@ public class SimService {
 		connection = DriverManager.getConnection(jdbcURL, username, password);
 		connection.setAutoCommit(false);
 		
-		String sql = "INSERT INTO user_details (email_id,Age,Name,city,country,State,zipcode,SUbscribe_status ) VALUES (?,?, ?,?,?,?,?,?)";
+		String sql = "INSERT INTO user_details (email_id,Age,Name,city,country,State,zipcode,SUbscribe_status,property_ids ) VALUES (?,?,?,?,?,?,?,?,?)";
         PreparedStatement statement = connection.prepareStatement(sql); 
         int count = 0;
         int batchSize=20;
@@ -113,6 +126,12 @@ public class SimService {
                         statement.setString(8,SUbscribe_status);
                         break;
                         
+                    case 8:
+                    	String property_ids =  nextCell.getStringCellValue();
+                    	System.out.println(property_ids);
+                        statement.setString(9,property_ids);
+                        break;
+                        
                     
              
                     }
@@ -131,6 +150,7 @@ public class SimService {
             connection.close();
 	    
         workbook.close();
+        emailRepository.propertyMapping();
 	    
 	}
     
@@ -157,12 +177,81 @@ public class SimService {
 			String id =jdbcTemplate.queryForObject("select campaign_id  from campaign_master where title=?",new Object[]{campaignDetails.getTitle()}, String.class);
 			//System.out.println(id);
 			campaignStatus.setCampaignId(id);
+			
+			campMapping();
+			
+			
+			
 		} catch(Exception e) {
 			msg = e.getMessage();
 			campaignStatus.setStatus(msg);
 		}
 		return campaignStatus;
 	}
+	
+	public String sendMail(CampaignDetails campaignDetails) throws MessagingException {
+		
+		
+		
+		int id =jdbcTemplate.queryForObject("select campaign_id from campaign_master order by campaign_id limit 1", int.class);
+		
+		String sql="select distinct e.email_id,e.Name from property_mapping u ,user_details e where u.email_id=e.email_id and e.SUbscribe_status='Y' and  u.property_id in (select property_id from \r\n" + 
+				"campaign_mapping where campaign_id=?)";
+		List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql, new Object[]{id});
+		for(Map<String, Object> row:rows){
+			
+			String name=(String) row.get("Name");
+			String email_id=(String)row.get("email_id");
+			
+			
+			//int noOfUploadTasks = jdbcTemplate.queryForObject("select Count(Distinct email_id)  from user_details",int.class);
+			int noOfUploadTasks=1;
+			ExecutorService exServicePool = Executors.newFixedThreadPool(noOfUploadTasks);
+			
+			
+			for(int i=1; i<=noOfUploadTasks; i++) {
+				String placeHolder = name;
+				String html_format=campaignDetails.getTemplate();
+				String replaced = html_format.replaceAll("name_sendmail", placeHolder);
+				
+				String replaced_email = replaced.replaceAll("email_sendmail","href=\"https://new-project-9tcbqz.stackblitz.io?email=" +email_id + "\"");
+				System.out.println(replaced_email);
+				MimeMessage msg = javaMailSender.createMimeMessage();
+		        MimeMessageHelper helper = new MimeMessageHelper(msg, true);
+		        helper.setBcc(email_id); // should fetch from DB
+		        String subject =jdbcTemplate.queryForObject("select title from campaign_master", String.class);
+		        System.out.println(subject);
+		        helper.setSubject(subject); // fetch from DB
+		        helper.setText(replaced, true);
+		        helper.setText(replaced_email, true);
+		        
+		        UploadResult uploadRunnable  = new UploadResult(helper, javaMailSender,msg);
+		        exServicePool.execute(uploadRunnable);
+			}
+		}
+		
+		
+		return "mailSend";
+}
+	
+	public void  campMapping() {
+		String sql = "Select campaign_id,perference_target_ids from campaign_master";
+		List<Map<String, Object>> rows = jdbcTemplate.queryForList(sql);
+		for(Map<String, Object> row:rows){
+			String perference_target_ids=(String)row.get("perference_target_ids");
+			int campaign_id=(int)row.get("campaign_id");
+			String[] property=perference_target_ids.split(",");
+			
+			for(String s:property) {
+				jdbcTemplate.update(
+		                "insert into campaign_mapping (campaign_id , property_id ) values(?,?)",
+		                campaign_id, Integer.parseInt(s));
+			}
+			
+		}
+	}
+	
+	
 	
 }
 							

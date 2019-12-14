@@ -1,7 +1,5 @@
 package com.example.SimActivation.Model;
 
-import java.util.List;
-
 public class CampaignDetails {
 	
 	private String title;
